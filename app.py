@@ -7,7 +7,7 @@ from database import save_data
 st.set_page_config(
     page_title="Healthcare AI Assistant",
     layout="centered"
-)
+)a
 
 st.title("Voice AI Healthcare Assistant")
 st.write("AI healthcare companion for elderly patients")
