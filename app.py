@@ -1,64 +1,77 @@
 import streamlit as st
-import io
-
+import av
+import numpy as np
 import speech_recognition as sr
+
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase
 
 from ai_engine import ask_ai
 from emergency import detect_emergency
 from database import save_data
 
 
-# ---------------- PAGE CONFIG ----------------
+# ---------------- PAGE ----------------
 st.set_page_config(
     page_title="Healthcare AI Assistant",
     layout="centered"
 )
 
-st.title("Voice AI Healthcare Assistant")
-st.write("AI healthcare companion for elderly patients")
+st.title("🎤 Voice AI Healthcare Assistant")
+st.write("Speak like WhatsApp voice note")
 
 # ---------------- SIDEBAR ----------------
 st.sidebar.title("Patient Details")
 name = st.sidebar.text_input("Patient Name")
 age = st.sidebar.number_input("Age", 1, 120)
 
-st.divider()
+# ---------------- AUDIO PROCESSOR ----------------
+class AudioProcessor(AudioProcessorBase):
+    def __init__(self):
+        self.frames = []
 
-# ---------------- AUDIO INPUT ----------------
-st.subheader("🎤 Speak or Upload Audio")
+    def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
+        self.frames.append(frame.to_ndarray())
+        return frame
 
-audio_file = st.file_uploader("Upload your voice (wav format recommended)", type=["wav"])
+
+# ---------------- MIC STREAM ----------------
+ctx = webrtc_streamer(
+    key="voice",
+    audio_processor_factory=AudioProcessor,
+    media_stream_constraints={"audio": True, "video": False},
+)
 
 user_text = ""
 
-if audio_file is not None:
-    recognizer = sr.Recognizer()
-
-    audio_bytes = io.BytesIO(audio_file.read())
-    audio = sr.AudioFile(audio_bytes)
-
-    with audio as source:
-        data = recognizer.record(source)
+# ---------------- PROCESS ----------------
+if ctx.audio_processor and st.button("Process Voice"):
 
     try:
-        user_text = recognizer.recognize_google(data)
-        st.success("Transcribed Text:")
+        audio_data = np.concatenate(ctx.audio_processor.frames, axis=1)
+
+        recognizer = sr.Recognizer()
+
+        audio = sr.AudioData(
+            audio_data.tobytes(),
+            sample_rate=48000,
+            sample_width=2
+        )
+
+        user_text = recognizer.recognize_google(audio)
+
+        st.success("You said:")
         st.write(user_text)
 
-    except Exception as e:
-        st.error(f"Could not understand audio: {e}")
+        # AI logic
+        emergency = detect_emergency(user_text)
 
-# ---------------- PROCESS ----------------
-if st.button("Process") and user_text:
+        if emergency:
+            st.error("🚨 Emergency detected! Contact doctor immediately.")
+        else:
+            response = ask_ai(user_text)
+            st.success(response)
 
-    emergency = detect_emergency(user_text)
+            save_data(user_text, response)
 
-    if emergency:
-        st.error("🚨 Emergency detected! Please contact a doctor immediately.")
-
-    else:
-        response = ask_ai(user_text)
-        st.success("AI Response:")
-        st.write(response)
-
-        save_data(user_text, response)
+    except Exception:
+        st.error("Could not understand audio")
